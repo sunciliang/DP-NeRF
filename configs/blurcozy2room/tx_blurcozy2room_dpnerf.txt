@@ -57,3 +57,7 @@ awp_depth_freq=3
 awp_ray_dir_freq=2
 
 use_coarse_to_fine_opt
+
+#render_exp
+max_exp=0
+min_exp=0

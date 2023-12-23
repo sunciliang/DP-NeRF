@@ -59,8 +59,10 @@ def _minify(basedir, factors=[], resolutions=[]):
 
 def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
     poses_arr = np.load(os.path.join(basedir, 'poses_bounds.npy'))
-    poses = poses_arr[:, :-2].reshape([-1, 3, 5]).transpose([1, 2, 0])
-    bds = poses_arr[:, -2:].transpose([1, 0])
+    poses = poses_arr[:, :-3].reshape([-1, 3, 5]).transpose([1, 2, 0])
+    bds = poses_arr[:, -3:-1].transpose([1, 0])
+    exps = poses_arr[:, -1:]
+    exps = np.array(exps).astype(np.float32)
 
     # img0 = [os.path.join(basedir, 'images', f) for f in sorted(os.listdir(os.path.join(basedir, 'images'))) \
     #         if f.endswith('JPG') or f.endswith('jpg') or f.endswith('png')][0]
@@ -103,7 +105,7 @@ def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
     imgs = np.stack(imgs, -1)
 
     print('Loaded image data', imgs.shape, poses[:, -1, 0])
-    return poses, bds, imgs
+    return poses, bds, imgs, exps
 
 
 def normalize(x):
@@ -238,8 +240,8 @@ def spherify_poses(poses, bds):
     return poses_reset, new_poses, bds
 
 
-def load_llff_data(args, basedir, factor=8, recenter=True, bd_factor=.75, spherify=False, path_epi=False):
-    poses, bds, imgs = _load_data(basedir, factor=factor)  # factor=8 downsamples original imgs by 8x
+def load_llff_data(args, basedir, factor=8, max_exp=1, min_exp=1, recenter=True, bd_factor=.75, spherify=False, path_epi=False):
+    poses, bds, imgs, exps = _load_data(basedir, factor=factor)  # factor=8 downsamples original imgs by 8x
     print('Loaded', basedir, bds.min(), bds.max())
 
     # Correct rotation matrix ordering and move variable dim to axis 0
@@ -248,6 +250,7 @@ def load_llff_data(args, basedir, factor=8, recenter=True, bd_factor=.75, spheri
     imgs = np.moveaxis(imgs, -1, 0).astype(np.float32)
     images = imgs
     bds = np.moveaxis(bds, -1, 0).astype(np.float32)
+    exps = 2 ** exps
 
     # Rescale if bd_factor is provided
     sc = 1. if bd_factor is None else 1. / (bds.min() * bd_factor)
@@ -289,6 +292,14 @@ def load_llff_data(args, basedir, factor=8, recenter=True, bd_factor=.75, spheri
         # Generate poses for spiral path
         # rads = [0.7, 0.2, 0.7]
         render_poses = render_path_spiral(c2w_path, up, rads, focal, zdelta, zrate=.5, rots=N_rots, N=N_views)
+        ################################################
+        # render_exps
+        #
+        ###############################################
+        render_exps =  np.linspace(min_exp, max_exp, N_views//2)# the exposure denotes exposure value (EV)
+        render_exps = 2 ** render_exps
+        render_exps = np.concatenate([render_exps, render_exps[::-1]])
+        render_exps = np.reshape(render_exps, [-1, 1]).astype(np.float32)
 
         if path_epi:
             #             zloc = np.percentile(tt, 10, 0)[2]
@@ -308,4 +319,4 @@ def load_llff_data(args, basedir, factor=8, recenter=True, bd_factor=.75, spheri
     images = images.astype(np.float32)
     poses = poses.astype(np.float32)
 
-    return images, poses, bds, render_poses, i_test
+    return images, poses, exps, bds, render_poses, render_exps, i_test

@@ -234,6 +234,14 @@ def config_parser():
     
     parser.add_argument("--save_warped_ray_img", action='store_true',
                         help='save_warped_ray_img')
+
+    #-----hdr----
+    parser.add_argument("--use_hdr", action='store_true',
+                        help='use_hdr')
+    parser.add_argument('--max_exp', type=float, default=0.0,
+                        help='maximum exposure time or exposure value of the rendered views')
+    parser.add_argument('--min_exp', type=float, default=0.0,
+                        help=' minimum exposure time or exposure value of the rendered views')
     return parser
 
 
@@ -248,13 +256,15 @@ def train():
     # Load data
     K = None
     if args.dataset_type == 'llff':
-        images, poses, bds, render_poses, i_test = load_llff_data(args, args.datadir, args.factor,
+        images, poses, exps_source, bds, render_poses, render_exps, i_test = load_llff_data(args, args.datadir, args.factor,
+                                                                  max_exp=args.max_exp, min_exp=args.min_exp,
                                                                   recenter=True, bd_factor=.75,
                                                                   spherify=args.spherify,
                                                                   path_epi=args.render_epi)
         hwf = poses[0, :3, -1]
         poses = poses[:, :3, :4]
         print('Loaded llff', images.shape, render_poses.shape, hwf, args.datadir)
+        exps = exps_source
         if not isinstance(i_test, list):
             i_test = [i_test]
 
@@ -296,6 +306,8 @@ def train():
 
     if args.render_test:
         render_poses = np.array(poses)
+        render_exps = np.array(exps_source[i_test])
+
 
     # Create log dir and copy the config file
     basedir = args.basedir
@@ -410,6 +422,7 @@ def train():
 
     # Move testing data to GPU
     render_poses = torch.tensor(render_poses[:, :3, :4]).cuda()
+    render_exps = torch.Tensor(render_exps).cuda()
     nerf = nerf.cuda()
     # Short circuit if only rendering out from trained model
     
@@ -545,7 +558,7 @@ def train():
     # [[focal,     0, 0.5*W],
     #  [    0, focal, 0.5*H],
     #  [    0,     0,     1]]
-    
+    exps = np.tile(exps[:, None, None, :], [1, H, W, 1])
     # For random ray batching
     print('get rays')
     rays = np.stack([get_rays_np(hei, wid, k_train, p) for p in poses[:, :3, :4]], 0)  # [N, ro+rd, H, W, 3]
@@ -558,6 +571,7 @@ def train():
     train_datas['rays_x'], train_datas['rays_y'] = xs[i_train].reshape(-1, 1), ys[i_train].reshape(-1, 1)
 
     train_datas['rgbsf'] = images_train[i_train].reshape(-1, 3)
+    train_datas['rays_exps'] = exps[i_train].reshape(-1,1)
 
     images_idx_tile = images_idx.reshape((num_img, 1, 1))
     images_idx_tile = np.tile(images_idx_tile, [1, hei, wid])
@@ -573,6 +587,7 @@ def train():
     # Move training data to GPU
     images = torch.tensor(images).cuda()
     imagesf = torch.tensor(imagesf).cuda()
+    exps_source = torch.Tensor(exps_source).cuda()
 
     poses = torch.tensor(poses).cuda()
     train_datas = {k: torch.tensor(v).cuda() for k, v in train_datas.items()}
@@ -594,6 +609,7 @@ def train():
         # Sample random ray batch
         iter_data = {k: v[i_batch:i_batch + N_rand] for k, v in train_datas.items()} # rays: [N_rand, ro+rd (2), 3]
         batch_rays = iter_data.pop('rays').permute(0, 2, 1) # [N_rand, 3, ro+rd (2)]
+        batch_exps = iter_data.pop('rays_exps')
 
         i_batch += N_rand
         if i_batch >= len(train_datas['rays']):
@@ -608,16 +624,19 @@ def train():
         nerf.train()
         if i == args.kernel_start_iter:
             torch.cuda.empty_cache()
-        rgb, rgb0, extra_loss = nerf(H, W, K, chunk=args.chunk,
-                                     rays=batch_rays, rays_info=iter_data,
+        rgb, rgb0, extra_loss, unit_exp_loss = nerf(H, W, K, chunk=args.chunk,
+                                     rays=batch_rays, exps=batch_exps, rays_info=iter_data,
                                      retraw=True, force_naive=i < args.kernel_start_iter,
                                      **render_kwargs_train)
 
         # Compute Losses
         # =====================
         target_rgb = iter_data['rgbsf'].squeeze(-2)
+
         img_loss = img2mse(rgb, target_rgb)
-        loss = img_loss
+        if i < args.kernel_start_iter:
+            unit_exp_loss = 0
+        loss = img_loss + unit_exp_loss*0.5
         psnr = mse2psnr(img_loss)
 
         img_loss0 = img2mse(rgb0, target_rgb)
@@ -665,7 +684,7 @@ def train():
             # Turn on testing mode
             with torch.no_grad():
                 nerf.eval()
-                rgbs, disps = nerf(H, W, K, args.chunk, poses=render_poses, render_kwargs=render_kwargs_test)
+                rgbs, disps = nerf(H, W, K, args.chunk, exps=render_exps, poses=render_poses, render_kwargs=render_kwargs_test)
             print('Done, saving', rgbs.shape, disps.shape)
             moviebase = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
             rgbs = (rgbs - rgbs.min()) / (rgbs.max() - rgbs.min())
@@ -688,14 +707,14 @@ def train():
         if i % args.i_testset == 0 and i > 0:
             testsavedir = os.path.join(basedir, expname, 'testset_{:06d}'.format(i))
             os.makedirs(testsavedir, exist_ok=True)
-            print('test poses shape', poses.shape)
+            print('test poses shape', poses[i_test].shape)
             dummy_num = ((len(poses) - 1) // args.num_gpu + 1) * args.num_gpu - len(poses)
             dummy_poses = torch.eye(3, 4).unsqueeze(0).expand(dummy_num, 3, 4).type_as(render_poses)
             print(f"Append {dummy_num} # of poses to fill all the GPUs")
             
             with torch.no_grad():
                 nerf.eval()
-                rgbs, _ = nerf(H, W, K, args.chunk, poses=torch.cat([poses, dummy_poses], dim=0).cuda(),
+                rgbs, _ = nerf(H, W, K, args.chunk, exps=exps_source, poses=torch.cat([poses, dummy_poses], dim=0).cuda(),
                                render_kwargs=render_kwargs_test)
                 rgbs = rgbs[:len(rgbs) - dummy_num]
                 rgbs_save = rgbs  # (rgbs - rgbs.min()) / (rgbs.max() - rgbs.min())

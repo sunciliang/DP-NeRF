@@ -297,7 +297,7 @@ class NeRFAll(nn.Module):
     def __init__(self, args, blur_kernel_net=None):
         super().__init__()
         self.args = args
-        
+        self.use_hdr = args.use_hdr
         
         self.blur_model_type = args.blur_model_type
         self.blur_kernel_net = blur_kernel_net
@@ -332,6 +332,10 @@ class NeRFAll(nn.Module):
         if blur_kernel_net is not None and self.blur_model_type == 'dpnerf':
             self.dbk_view_embedding = blur_kernel_net.view_embed_layer
             self.mlp_rbk = blur_kernel_net.RBK
+            self.expmodel = Exp_model(
+                D=args.netdepth_fine, W=args.netwidth_fine,
+                input_ch=self.input_ch, output_ch=self.output_ch
+            )
         
         if self.use_awp:
             self.AWPnet = self.blur_kernel_net.AWPnet
@@ -345,6 +349,7 @@ class NeRFAll(nn.Module):
         self.tonemapping = ToneMapping(args.tone_mapping_type)
         # self.white_balance = WhiteBalance('white_balance_consistent', args.num_images)
 
+
     def mlpforward(self, inputs, viewdirs, mlp, force_naive, inference, netchunk=1024 * 64):
         """Prepares inputs and applies network 'fn'.
             """
@@ -355,6 +360,9 @@ class NeRFAll(nn.Module):
             input_dirs = viewdirs[:, None].expand(inputs.shape)
             input_dirs_flat = torch.reshape(input_dirs, [-1, input_dirs.shape[-1]])
             embedded_dirs = self.embeddirs_fn(input_dirs_flat)
+            # input_exps = torch.broadcast_to(ray_exp[:, None, :], [ray_exp.shape[0], inputs.shape[1], 1])
+            # input_exps_flat = torch.reshape(input_exps, [-1, input_exps.shape[-1]])
+
             embedded = torch.cat([embedded, embedded_dirs], -1)
 
         # batchify execution
@@ -469,7 +477,12 @@ class NeRFAll(nn.Module):
         """
         N_rays = ray_batch.shape[0]
         rays_o, rays_d = ray_batch[:, 0:3], ray_batch[:, 3:6]  # [N_rays, 3] each
-        viewdirs = ray_batch[:, -3:] if ray_batch.shape[-1] > 8 else None
+        if inference:
+            # viewdirs = ray_batch[:, -3:] if ray_batch.shape[-1] > 8 else None
+            viewdirs = ray_batch[:, -4:-1] if ray_batch.shape[-1] > 8 else None
+            ray_exp = ray_batch[:, -1:]
+        else :
+            viewdirs = ray_batch[:, -3:] if ray_batch.shape[-1] > 8 else None
         bounds = torch.reshape(ray_batch[..., 6:8], [-1, 1, 2])
         near, far = bounds[..., 0], bounds[..., 1]  # [-1,1]
 
@@ -507,7 +520,8 @@ class NeRFAll(nn.Module):
             
         rgb_map, density_map, acc_map, weights, depth_map = self.raw2outputs(raw, z_vals, rays_d, raw_noise_std,
                                                                              white_bkgd, pytest=pytest)
-
+        if inference:
+            rgb_map = self.expmodel(rgb_map, ray_exp)
         if N_importance > 0:
             rgb_map_0, depth_map_0, acc_map_0, density_map0  = rgb_map, depth_map, acc_map, density_map
             if self.use_awp and not force_naive and not inference:
@@ -531,6 +545,8 @@ class NeRFAll(nn.Module):
 
             rgb_map, density_map, acc_map, weights, depth_map = self.raw2outputs(raw, z_vals, rays_d, raw_noise_std,
                                                                                  white_bkgd, pytest=pytest)
+            if inference:
+                rgb_map = self.expmodel(rgb_map, ray_exp)
 
         ret = {'rgb_map': rgb_map, 'depth_map': depth_map, 'acc_map': acc_map, 'density_map': density_map}
         if retraw:
@@ -553,7 +569,7 @@ class NeRFAll(nn.Module):
                 print(f"! [Numerical Error] {k} contains inf.")
         return ret
 
-    def forward(self, H, W, K, chunk=1024 * 32, rays=None, rays_info=None, poses=None, **kwargs):
+    def forward(self, H, W, K, chunk=1024 * 32, rays=None, exps=None, rays_info=None, poses=None, **kwargs):
         """
         render rays or render poses, rays and poses should atleast specify one
         calling model.train() to render rays, where rays, rays_info, should be specified
@@ -581,7 +597,7 @@ class NeRFAll(nn.Module):
                     else:
                         rays, ccw = self.mlp_rbk(rays, rays_info)
                         
-                    rgb, depth, acc, extras = self.render(H, W, K, chunk, rays, **kwargs)
+                    rgb, depth, acc, extras = self.render(H, W, K, chunk, rays, None, **kwargs)
                     if self.use_awp:    
                         ccw_fine = self.AWPnet(extras['depth_feature'], extras['z_vals'], extras['rays_d'], view_feature)
                         ccw_fine = ccw_fine + ccw_fine * self.AWPnet.ccw_fine_scale
@@ -593,21 +609,30 @@ class NeRFAll(nn.Module):
                         extras_fine = extras.copy()
                         rgb, depth, acc, extras = self.mlp_rbk.rbk_weighted_sum(rgb, depth, acc, extras, ccw)
                         rgb_awp, _, _, _ = self.mlp_rbk.rbk_weighted_sum(rgb_fine, depth_fine, acc_fine, extras_fine, ccw_fine)
-                        return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), {'rgb_awp': self.tonemapping(rgb_awp)}
-                        
+                        #######################
+                        rgb = self.expmodel(rgb, exps)
+                        rgb_awp = self.expmodel(rgb_awp, exps)
+                        fix_mp =  self.expmodel.point_constraint(0.5)
+                        ##无sigmoid，
+                        return rgb, extras['rgb0'], {'rgb_awp': rgb_awp}, fix_mp
+                        # return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), {'rgb_awp': self.tonemapping(rgb_awp)}
+
                     else:
                         rgb, depth, acc, extras = self.mlp_rbk.rbk_weighted_sum(rgb, depth, acc, extras, ccw)
-                        return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), 
+                        return rgb, extras['rgb0'],{}, None
+                        # return self.tonemapping(rgb), self.tonemapping(extras['rgb0']),
                         
                 else:
                     rgb, depth, acc, extras = self.render(H, W, K, chunk, rays, **kwargs)
-                    return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), {}
+                    return rgb, extras['rgb0'], {}, None
+                    # return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), {}
                     
                 
             else:
                 kwargs['img_idx'] = rays_info['images_idx'].squeeze(-1)
-                rgb, depth, acc, extras = self.render(H, W, K, chunk, rays, **kwargs)
-                return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), {}
+                rgb, depth, acc, extras = self.render(H, W, K, chunk, rays, exps, **kwargs)
+                return rgb, extras['rgb0'], {}, None
+                # return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), {}
                 
 
         #  evaluation
@@ -619,10 +644,10 @@ class NeRFAll(nn.Module):
                 return self.tonemapping(rgbs), depths, rays_warped
             else:
                 assert poses is not None, "Please specify poses when in the eval model"
-                rgbs, depths = self.render_path(H, W, K, chunk, poses, **kwargs)
+                rgbs, depths = self.render_path(H, W, K, chunk, poses, exps, **kwargs)
                 return self.tonemapping(rgbs), depths
 
-    def render(self, H, W, K, chunk, rays=None, c2w=None, ndc=True,
+    def render(self, H, W, K, chunk, rays=None, exps=None, c2w=None, ndc=True,
                near=0., far=1.,
                use_viewdirs=False, c2w_staticcam=None, 
                use_awp=False,
@@ -668,11 +693,15 @@ class NeRFAll(nn.Module):
         # Create ray batch
         rays_o = torch.reshape(rays_o, [-1, 3]).float()
         rays_d = torch.reshape(rays_d, [-1, 3]).float()
+        if self.use_hdr and kwargs['inference'] :
+            exps = torch.reshape(exps, [-1, 1]).float()
 
         near, far = near * torch.ones_like(rays_d[..., :1]), far * torch.ones_like(rays_d[..., :1])
         rays = torch.cat([rays_o, rays_d, near, far], -1)
         if use_viewdirs:
             rays = torch.cat([rays, viewdirs], -1)
+        if self.use_hdr and kwargs['inference']:
+            rays = torch.cat([rays, exps], -1)
 
         # Batchfy and Render and reshape
         all_ret = {}
@@ -694,7 +723,7 @@ class NeRFAll(nn.Module):
             ret_dict['rays_d'] = rays_d
         return ret_list + [ret_dict]
 
-    def render_path(self, H, W, K, chunk, render_poses, render_kwargs, render_factor=0):
+    def render_path(self, H, W, K, chunk, render_poses, render_exps, render_kwargs, render_factor=0):
         """
         render image specified by the render_poses
         """
@@ -712,7 +741,9 @@ class NeRFAll(nn.Module):
             t = time.time()
             rays = get_rays(H, W, K, c2w)
             rays = torch.stack(rays, dim=-1)
-            rgb, depth, acc, extras = self.render(H, W, K, chunk=chunk, rays=rays, c2w=c2w[:3, :4], **render_kwargs)
+            exps = render_exps[i]
+            exps = torch.broadcast_to(exps[None, None, :], [H, W, 1])
+            rgb, depth, acc, extras = self.render(H, W, K, chunk=chunk, rays=rays, exps=exps, c2w=c2w[:3, :4], **render_kwargs)
             rgbs.append(rgb)
             depths.append(depth)
             if i == 0:
