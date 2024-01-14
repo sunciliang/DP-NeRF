@@ -3,7 +3,7 @@ import time
 
 import cv2
 import imageio
-from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
 
 # from NeRF import *
 from models.dpnerf import *
@@ -151,11 +151,11 @@ def config_parser():
                         help='frequency of console printout and metric loggin')
     parser.add_argument("--i_tensorboard", type=int, default=200,
                         help='frequency of tensorboard image logging')
-    parser.add_argument("--i_weights", type=int, default=20000,
+    parser.add_argument("--i_weights", type=int, default=10000,
                         help='frequency of weight ckpt saving')
-    parser.add_argument("--i_testset", type=int, default=20000,
+    parser.add_argument("--i_testset", type=int, default=1,
                         help='frequency of testset saving')
-    parser.add_argument("--i_video", type=int, default=20000,
+    parser.add_argument("--i_video", type=int, default=200000,
                         help='frequency of render_poses video saving')
 
     
@@ -317,7 +317,7 @@ def train():
     os.makedirs(os.path.join(basedir, expname), exist_ok=True)
     os.makedirs(os.path.join(tensorboardbase, expname), exist_ok=True)
 
-    tensorboard = SummaryWriter(os.path.join(tensorboardbase, expname))
+    # tensorboard = SummaryWriter(os.path.join(tensorboardbase, expname))
 
     f = os.path.join(basedir, expname, 'args.txt')
     with open(f, 'w') as file:
@@ -636,7 +636,7 @@ def train():
         img_loss = img2mse(rgb, target_rgb)
         if i < args.kernel_start_iter:
             unit_exp_loss = 0
-        loss = img_loss + unit_exp_loss*0.5
+        loss = img_loss #+ unit_exp_loss*0.5
         psnr = mse2psnr(img_loss)
 
         img_loss0 = img2mse(rgb0, target_rgb)
@@ -735,10 +735,10 @@ def train():
                 if isinstance(test_lpips, torch.Tensor):
                     test_lpips = test_lpips.item()
 
-                tensorboard.add_scalar("Test MSE", test_mse, global_step)
-                tensorboard.add_scalar("Test PSNR", test_psnr, global_step)
-                tensorboard.add_scalar("Test SSIM", test_ssim, global_step)
-                tensorboard.add_scalar("Test LPIPS", test_lpips, global_step)
+                # tensorboard.add_scalar("Test MSE", test_mse, global_step)
+                # tensorboard.add_scalar("Test PSNR", test_psnr, global_step)
+                # tensorboard.add_scalar("Test SSIM", test_ssim, global_step)
+                # tensorboard.add_scalar("Test LPIPS", test_lpips, global_step)
                 
             with open(test_metric_file, 'a') as outfile:
                 outfile.write(f"iter{i}/globalstep{global_step}: MSE:{test_mse:.8f} PSNR:{test_psnr:.8f}"
@@ -749,9 +749,9 @@ def train():
 
             print('Saved test set')
 
-        if i % args.i_tensorboard == 0:
-            tensorboard.add_scalar("Loss", loss.item(), global_step)
-            tensorboard.add_scalar("PSNR", psnr.item(), global_step)
+        # if i % args.i_tensorboard == 0:
+        #     tensorboard.add_scalar("Loss", loss.item(), global_step)
+        #     tensorboard.add_scalar("PSNR", psnr.item(), global_step)
             # for k, v in extra_loss.items():
                 # tensorboard.add_scalar(k, v.item(), global_step)
 

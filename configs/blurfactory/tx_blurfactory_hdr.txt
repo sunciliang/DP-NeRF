@@ -22,7 +22,7 @@ rgb_activate = sigmoid
 blur_model_type = dpnerf
 
 kernel_start_iter = 1200
-tone_mapping_type = none
+tone_mapping_type = split_linear
 render_focuspoint_scale = 0.25
 render_radius_scale = 0.5
 render_rmnearplane = 5
