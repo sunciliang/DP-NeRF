@@ -64,7 +64,7 @@ def config_parser():
                         help='exponential learning rate decay (in 1000 steps)')
     # generate N_rand # of rays, divide into chunk # of batch
     # then generate chunk * N_samples # of points, divide into netchunk # of batch
-    parser.add_argument("--chunk", type=int, default=1024 * 32,
+    parser.add_argument("--chunk", type=int, default=1024 * 28,#32,
                         help='number of rays processed in parallel, decrease if running out of memory')
     parser.add_argument("--netchunk", type=int, default=1024 * 64,
                         help='number of pts sent through network in parallel, decrease if running out of memory')
@@ -153,9 +153,9 @@ def config_parser():
                         help='frequency of tensorboard image logging')
     parser.add_argument("--i_weights", type=int, default=20000,
                         help='frequency of weight ckpt saving')
-    parser.add_argument("--i_testset", type=int, default=20000,
+    parser.add_argument("--i_testset", type=int, default=50000,
                         help='frequency of testset saving')
-    parser.add_argument("--i_video", type=int, default=20000,
+    parser.add_argument("--i_video", type=int, default=200000,
                         help='frequency of render_poses video saving')
 
     
@@ -636,7 +636,7 @@ def train():
         img_loss = img2mse(rgb, target_rgb)
         if i < args.kernel_start_iter:
             unit_exp_loss = 0
-        loss = img_loss + unit_exp_loss*0.5
+        loss = img_loss #+ unit_exp_loss*0.5
         psnr = mse2psnr(img_loss)
 
         img_loss0 = img2mse(rgb0, target_rgb)
@@ -730,21 +730,21 @@ def train():
 
                 test_mse = compute_img_metric(rgbs, target_rgb_gt, 'mse')
                 test_psnr = compute_img_metric(rgbs, target_rgb_gt, 'psnr')
-                test_ssim = compute_img_metric(rgbs, target_rgb_gt, 'ssim')
-                test_lpips = compute_img_metric(rgbs, target_rgb_gt, 'lpips')
-                if isinstance(test_lpips, torch.Tensor):
-                    test_lpips = test_lpips.item()
+                # test_ssim = compute_img_metric(rgbs, target_rgb_gt, 'ssim')
+                # test_lpips = compute_img_metric(rgbs, target_rgb_gt, 'lpips')
+                # if isinstance(test_lpips, torch.Tensor):
+                #     test_lpips = test_lpips.item()
 
                 tensorboard.add_scalar("Test MSE", test_mse, global_step)
                 tensorboard.add_scalar("Test PSNR", test_psnr, global_step)
-                tensorboard.add_scalar("Test SSIM", test_ssim, global_step)
-                tensorboard.add_scalar("Test LPIPS", test_lpips, global_step)
+                # tensorboard.add_scalar("Test SSIM", test_ssim, global_step)
+                # tensorboard.add_scalar("Test LPIPS", test_lpips, global_step)
                 
             with open(test_metric_file, 'a') as outfile:
                 outfile.write(f"iter{i}/globalstep{global_step}: MSE:{test_mse:.8f} PSNR:{test_psnr:.8f}"
-                              f" SSIM:{test_ssim:.8f} LPIPS:{test_lpips:.8f}\n")
+                              )
                 print(f"**[Evaluation]** Iter{i}/globalstep{global_step}: MSE:{test_mse:.8f} PSNR:{test_psnr:.8f}"
-                              f" SSIM:{test_ssim:.8f} LPIPS:{test_lpips:.8f}")
+                              )
             
 
             print('Saved test set')

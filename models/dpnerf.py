@@ -612,27 +612,27 @@ class NeRFAll(nn.Module):
                         #######################
                         rgb = self.expmodel(rgb, exps)
                         rgb_awp = self.expmodel(rgb_awp, exps)
-                        fix_mp =  self.expmodel.point_constraint(0.5)
+                        # fix_mp =  self.expmodel.point_constraint(0.5)
                         ##无sigmoid，
-                        return rgb, extras['rgb0'], {'rgb_awp': rgb_awp}, fix_mp
-                        # return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), {'rgb_awp': self.tonemapping(rgb_awp)}
+                        # return rgb, extras['rgb0'], {'rgb_awp': rgb_awp}, None
+                        return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), {'rgb_awp': self.tonemapping(rgb_awp)}, None
 
                     else:
                         rgb, depth, acc, extras = self.mlp_rbk.rbk_weighted_sum(rgb, depth, acc, extras, ccw)
                         return rgb, extras['rgb0'],{}, None
-                        # return self.tonemapping(rgb), self.tonemapping(extras['rgb0']),
+                        # return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), None
                         
                 else:
                     rgb, depth, acc, extras = self.render(H, W, K, chunk, rays, **kwargs)
-                    return rgb, extras['rgb0'], {}, None
-                    # return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), {}
+                    # return rgb, extras['rgb0'], {}, None
+                    return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), {}, None
                     
                 
             else:
                 kwargs['img_idx'] = rays_info['images_idx'].squeeze(-1)
                 rgb, depth, acc, extras = self.render(H, W, K, chunk, rays, exps, **kwargs)
                 return rgb, extras['rgb0'], {}, None
-                # return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), {}
+                # return self.tonemapping(rgb), self.tonemapping(extras['rgb0']), {}, None
                 
 
         #  evaluation

@@ -274,41 +274,53 @@ class Exp_model(nn.Module):
         self.input_ch = input_ch
         self.input_ch_views = input_ch_views
         # exp>=====================================================
-        self.exps_linears_r = nn.ModuleList([nn.Linear(1, self.W // 2)])
-        self.exps_linears_g = nn.ModuleList([nn.Linear(1, self.W // 2)])
-        self.exps_linears_b = nn.ModuleList([nn.Linear(1, self.W // 2)])
-        self.b_l_linner = nn.Linear(self.W // 2, 1)
-        self.r_l_linner = nn.Linear(self.W // 2, 1)
-        self.g_l_linner = nn.Linear(self.W // 2, 1)
+        # self.exps_linears_r = nn.ModuleList([nn.Linear(1, self.W // 2)])
+        # self.exps_linears_g = nn.ModuleList([nn.Linear(1, self.W // 2)])
+        # self.exps_linears_b = nn.ModuleList([nn.Linear(1, self.W // 2)])
+        # self.b_l_linner = nn.Linear(self.W // 2, 1)
+        # self.r_l_linner = nn.Linear(self.W // 2, 1)
+        # self.g_l_linner = nn.Linear(self.W // 2, 1)
+
+        self.exps_linears_all = nn.ModuleList([nn.Linear(1, self.W // 2), nn.Linear(self.W // 2,self.W // 2)])
+        self.one_rgb_channels = nn.Linear(self.W // 2, 1)
 
     def forward(self,input,exp):
         # print(torch.log(exp))
-        r_h_s = input[:, 0:1] + torch.log(exp)
-        g_h_s = input[:, 1:2] + torch.log(exp)
-        b_h_s = input[:, 2:3] + torch.log(exp)
+
+        h = exp
+        for i, l in enumerate(self.exps_linears_all):
+            h = self.exps_linears_all[i](h)
+            h = F.relu(h)
+        w = self.one_rgb_channels(h)
+        w = F.sigmoid(w) * 1.5
+
+        r_h_s = input[:, 0:1] + torch.log(w)
+        g_h_s = input[:, 1:2] + torch.log(w)
+        b_h_s = input[:, 2:3] + torch.log(w)
 
         lnx = torch.cat([r_h_s, g_h_s, b_h_s], -1)
+        rgb_l = lnx
 
         r_h = lnx[:, 0:1]
         g_h = lnx[:, 1:2]
         b_h = lnx[:, 2:3]
 
-        for i, l in enumerate(self.exps_linears_r):
-            r_h = self.exps_linears_r[i](r_h)
-            r_h = F.relu(r_h)
-        r_l = self.r_l_linner(r_h)
-
-        for i, l in enumerate(self.exps_linears_g):
-            g_h = self.exps_linears_g[i](g_h)
-            g_h = F.relu(g_h)
-        g_l = self.g_l_linner(g_h)
-
-        for i, l in enumerate(self.exps_linears_b):
-            b_h = self.exps_linears_b[i](b_h)
-            b_h = F.relu(b_h)
-        b_l = self.b_l_linner(b_h)
-
-        rgb_l = torch.cat([r_l, g_l, b_l], -1)
+        # for i, l in enumerate(self.exps_linears_r):
+        #     r_h = self.exps_linears_r[i](r_h)
+        #     r_h = F.relu(r_h)
+        # r_l = self.r_l_linner(r_h)
+        #
+        # for i, l in enumerate(self.exps_linears_g):
+        #     g_h = self.exps_linears_g[i](g_h)
+        #     g_h = F.relu(g_h)
+        # g_l = self.g_l_linner(g_h)
+        #
+        # for i, l in enumerate(self.exps_linears_b):
+        #     b_h = self.exps_linears_b[i](b_h)
+        #     b_h = F.relu(b_h)
+        # b_l = self.b_l_linner(b_h)
+        #
+        # rgb_l = torch.cat([r_l, g_l, b_l], -1)
 
         return rgb_l
 

@@ -287,8 +287,8 @@ def load_llff_data(args, basedir, factor=8, max_exp=1, min_exp=1, recenter=True,
         rads[0] *= args.render_radius_scale
         rads[1] *= args.render_radius_scale
         c2w_path = c2w
-        N_views = 120
-        N_rots = 2
+        N_views = 60
+        N_rots = 1
         # Generate poses for spiral path
         # rads = [0.7, 0.2, 0.7]
         render_poses = render_path_spiral(c2w_path, up, rads, focal, zdelta, zrate=.5, rots=N_rots, N=N_views)

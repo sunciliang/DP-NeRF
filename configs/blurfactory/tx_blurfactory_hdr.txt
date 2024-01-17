@@ -1,5 +1,5 @@
 num_gpu = 1
-expname = blurfactory1_full_wodepth_woprior_hdr
+expname = "blurfactoryhdrT1_test_split_linear"
 basedir = ./logs
 datadir = ./dataset/deblurnerf_dataset/synthetic_camera_motion_blur/blurfactoryhdr
 tbdir = ./logs_tb
@@ -22,7 +22,7 @@ rgb_activate = sigmoid
 blur_model_type = dpnerf
 
 kernel_start_iter = 1200
-tone_mapping_type = none
+tone_mapping_type = split_linear
 render_focuspoint_scale = 0.25
 render_radius_scale = 0.5
 render_rmnearplane = 5
@@ -61,3 +61,5 @@ awp_ray_dir_freq=2
 use_coarse_to_fine_opt
 
 use_hdr
+max_exp = 0
+min_exp = 0
